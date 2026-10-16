@@ -1,0 +1,16 @@
+# Core dependencies (CPU; runs on any workstation). Pinned to the versions
+# used for the reported results.
+mcap==1.5.0
+mcap-ros2-support==0.5.7
+numpy>=1.24,<3
+scipy>=1.10
+opencv-python-headless>=4.8,<4.11
+PyYAML>=6.0
+matplotlib>=3.7           # evaluation plots only
+
+# Optional, for the GPU relocalization path (declared external model DINOv2).
+# Install separately to match your CUDA; e.g. on a Pascal/P5200 use a CUDA
+# build of torch. These are NOT needed for the default (motion-only) pipeline.
+# torch>=2.0
+# torchvision>=0.15
+# timm>=0.9               # if using timm-hosted backbones

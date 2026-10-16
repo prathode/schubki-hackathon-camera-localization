@@ -1,0 +1,127 @@
+# Default configuration for camera-based race-track localization.
+# All runtime behaviour is driven from here so experiments stay reproducible.
+
+dataset:
+  # Path to the ROS 2 MCAP recording (set via CLI --mcap or here).
+  mcap: null
+  # Topic templates / names (verified against the provided recording).
+  camera_image_topic: "/constructor0/sensor/camera_{cam}/compressed_image"
+  camera_info_topic: "/constructor0/sensor/camera_{cam}/camera_info"
+  tf_static_topic: "/tf_static"
+  track_bounds_topic: "/constructor0/track_bounds"
+  # Ground-truth / state topics. EVALUATION ONLY for pose fields.
+  # state_estimation provides ALLOWED motion fields (see allowlist below).
+  state_estimation_topic: "/constructor0/state_estimation"
+  tf_topic: "/tf"                       # ground truth map->base_link, EVAL ONLY
+  base_link_frame: "constructor0/base_link"
+  map_frame: "map"
+  cameras: ["fl", "fr", "cl", "cr", "r", "rl", "rr"]
+
+# Strict allowlist of StateEstimation fields the inference path may read.
+# Everything else (absolute pose x_m/y_m/z_m/roll/pitch/yaw, sn_map_state,
+# pos_accuracy) is PROHIBITED ground truth and must never be read at inference.
+state_allowlist:
+  - v_mps          # vehicle longitudinal speed (m/s)
+  - v_raw_mps      # raw speed
+  - vx_mps         # body-frame velocity x (forward)
+  - vy_mps         # body-frame velocity y (left)
+  - wz_radps       # yaw rate (rad/s)
+  - yaw_vel_rad    # yaw rate (alt)
+  - beta_rad       # sideslip angle
+  - ax_mps2        # body accel x
+  - ay_mps2        # body accel y
+  - delta_wheel_rad  # steering angle
+  - kappa_radpm    # path curvature
+
+# Image set assembly: the 7 cameras each have their own stamp; group frames
+# whose stamps fall within this window into one "image set".
+image_set:
+  sync_window_ms: 40      # max spread of stamps within one set
+  reference_cam: "fl"     # stamp used as the set timestamp_ns
+
+# Motion model / EKF process noise and update settings.
+filter:
+  type: "ekf"             # ekf | deadreckoning
+  # process noise (per sqrt(dt)) on [x, y, yaw]
+  q_pos: 0.05             # m
+  q_yaw: 0.002            # rad
+  # scale factor applied to reported speed (calibration slack)
+  speed_scale: 1.0
+  # yaw-rate (gyro) bias handling. auto_yaw_bias estimates a constant bias
+  # from the stationary startup (zero-velocity update); yaw_rate_bias is a
+  # fixed fallback (rad/s) used when auto estimation is off.
+  auto_yaw_bias: true
+  bias_v_thresh: 0.3
+  yaw_rate_bias: 0.0
+  # measurement noise for border-match update [lateral_m, yaw_rad]
+  r_lateral: 0.25
+  r_yaw: 0.02
+  # gate: reject border updates with chamfer residual above this (m)
+  gate_residual_m: 1.5
+
+# Map-tangent yaw correction: anchors slow yaw drift using the track
+# direction as an absolute heading reference (no pixel detection; CPU-cheap;
+# generalizes to unseen runs). Gated to near-straight sections that agree
+# with the current heading.
+tangent_yaw:
+  # DISABLED by default. Validated to help on a clean flying lap (7.2 m vs
+  # 11.0 m motion-only) but UNSAFE globally: once position drift grows, the
+  # nearest-border tangent locks onto the wrong parallel straight and the
+  # estimate diverges (see docs/APPROACH.md, failure analysis). Enable only
+  # together with a reliable absolute-position source (GPU relocalization or
+  # working border-ICP) that keeps position trustworthy.
+  enabled: false
+  tangent_window: 8        # polyline samples each side for tangent estimate
+  max_curvature: 0.015     # 1/m; skip corners (racing line != tangent there)
+  agree_deg: 6.0           # reject if tangent disagrees with heading > this
+  r_yaw: 0.05              # measurement noise (rad) -> gentle pull
+  max_border_dist_m: 25.0  # need a border within this range
+  max_pos_cov: 4.0         # skip update when EKF position covariance exceeds
+
+# Track-border matching (the main lateral/yaw corrector).
+border_match:
+  # DISABLED by default. Classical night-time track-edge detection is too
+  # noisy (projected off-road/barrier points corrupt the ICP), making the
+  # score WORSE on validation (see docs/APPROACH.md). Kept for the GPU path:
+  # replace border_detect with a learned drivable-surface segmentation and
+  # re-enable. Geometry (ground projection + map ICP) is validated.
+  enabled: false
+  # cameras used for ground-plane border projection (most reliable calib).
+  cams: ["fl", "fr", "r", "rl"]
+  flat_track: true
+  max_range_m: 40.0       # ignore projected points beyond this range
+  min_points: 30          # need at least this many border px to attempt match
+  icp_iters: 8
+
+# Visual relocalization against a training-run database (coarse absolute fix).
+# The DB is built offline from training GT (permitted for map-building) and
+# loaded read-only at inference. Gated so it only bounds drift.
+reloc:
+  # DISABLED by default. The CPU thumbnail descriptor retrieves too coarsely
+  # (~18 m) to help and off-the-shelf CNN features are not discriminative on
+  # repetitive night scenes. Enable with descriptor=dinov2 on a GPU and a
+  # task-tuned descriptor for a real absolute-position anchor (see docs).
+  enabled: false
+  db_path: "outputs/reloc_db.npz"
+  descriptor: "thumb"      # thumb (CPU) | dinov2 (GPU, declared external)
+  dino_model: "dinov2_vits14"
+  build_stride: 2          # sample every Nth image set when building the DB
+  topk: 5
+  min_sim: 0.55            # reject weak retrievals
+  max_spread_m: 8.0        # reject ambiguous (spread-out) top-k
+  r_pos: 6.0               # base measurement noise (m) for the position fix
+  gate_dist_m: 20.0        # reject fixes farther than this from prediction
+  apply_every: 3           # apply a reloc update at most every Nth image set
+
+# Visual odometry (optional backup motion cue).
+vo:
+  enabled: false
+  cam: "fl"
+
+output:
+  format: "A"             # A = timestamp_ns,x,y,yaw (map frame)
+  path: "outputs/submission.csv"
+
+runtime:
+  log_every: 500
+  device: "cpu"           # cpu | cuda  (GPU-optional; sandbox is CPU-only)
