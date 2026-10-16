@@ -98,22 +98,57 @@ back to CPU automatically** if CUDA is unavailable or the GPU move fails
 crashes because of the GPU. On a Pascal card (P5200) FlashAttention is
 auto-disabled and mixed precision is left off.
 
-### GPU relocalization (ALIKED + LightGlue) — on your workstation
+### GPU relocalization — on your workstation
+
+Install the optional deps (CUDA torch + LightGlue, which bundles ALIKED;
+optionally LoMa):
 
 ```bash
-# install the optional deps (CUDA torch + LightGlue, which bundles ALIKED)
 pip install "lightglue @ git+https://github.com/cvg/LightGlue.git"
+# optional alternative matcher:
+# pip install "loma @ git+https://github.com/davnords/LoMa.git"
+```
 
-# 1) build the keyframe feature DB from the training run (uses training GT
-#    for map-building only; exclude held-out laps)
+**Option 1 — essential-matrix relocalization (ALIKED + LightGlue):**
+
+```bash
 python scripts/build_feature_db.py --mcap "$MCAP" \
     --out outputs/feature_db.pkl --set runtime.device=cuda \
     --exclude-start-s 680 --exclude-end-s 1063
-
-# 2) run with metric relocalization enabled
 python run.py --mcap "$MCAP" --out outputs/submission.csv \
     --set metric_reloc.enabled=true --set runtime.device=cuda
 ```
+
+**Option 2 — PnP against a triangulated 3D landmark map (strongest):**
+
+```bash
+python scripts/build_landmark_map.py --mcap "$MCAP" --cam fl \
+    --out outputs/landmarks_fl.npz --set runtime.device=cuda \
+    --exclude-start-s 680 --exclude-end-s 1063
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set pnp_reloc.enabled=true \
+    --set 'pnp_reloc.map_paths={fl: outputs/landmarks_fl.npz}' \
+    --set runtime.device=cuda
+```
+
+**Option 3 — learned border segmentation (lateral/yaw map fix):**
+
+```bash
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set border_match.enabled=true --set segmentation.enabled=true \
+    --set runtime.device=cuda
+```
+
+**Benchmark matchers before promoting one:**
+
+```bash
+python scripts/benchmark_matchers.py --mcap "$MCAP" \
+    --matchers aliked_lightglue loma-b --cam fl --pairs 40 \
+    --set runtime.device=cuda      # -> reports/matcher_benchmark.csv
+```
+
+These paths can be combined (e.g. PnP + segmentation border matching); all
+corrections fuse through the one causal EKF and are hard-gated.
 
 ---
 

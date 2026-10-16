@@ -38,13 +38,14 @@ class PoseEstimate:
 
 class Localizer:
     def __init__(self, cfg: dict, border_matcher=None, relocalizer=None,
-                 tangent_yaw=None, metric_reloc=None):
+                 tangent_yaw=None, metric_reloc=None, pnp_reloc=None):
         self.cfg = cfg
         self.motion = MotionIntegrator(cfg)
         self.ekf = PoseEKF(cfg)
         self.border = border_matcher
         self.reloc = relocalizer
         self.metric_reloc = metric_reloc
+        self.pnp_reloc = pnp_reloc
         self.tangent = tangent_yaw
         self._last_state_ns: Optional[int] = None
         self._set_count = 0
@@ -123,8 +124,23 @@ class Localizer:
                     self.ekf.update_yaw_ref(tr.yaw_ref, self.tangent.r_yaw)
                     source = "tangent"
 
-        # ---- metric relocalization (ALIKED+LightGlue): absolute fix (gated) ----
-        if (self.metric_reloc is not None
+        # ---- PnP relocalization (3D landmarks): strongest absolute fix ----
+        absolute_done = False
+        if (self.pnp_reloc is not None
+                and self.cfg.get("pnp_reloc", {}).get("enabled")):
+            stride = int(self.cfg["pnp_reloc"].get("apply_every", 1))
+            if self._set_count % stride == 0:
+                pr = self.pnp_reloc.query(iset, self.ekf.pose)
+                if pr.ok and pr.n_inliers >= self.cfg["pnp_reloc"]["min_inliers"]:
+                    self.ekf.update_position(pr.x, pr.y, pr.r_pos)
+                    self.ekf.update_yaw_ref(pr.yaw, pr.r_yaw)
+                    source = "pnp"
+                    n_pts = pr.n_inliers
+                    absolute_done = True
+
+        # ---- metric relocalization (ALIKED+LightGlue essential matrix) ----
+        # Used when PnP did not produce a fix this frame.
+        if (not absolute_done and self.metric_reloc is not None
                 and self.cfg.get("metric_reloc", {}).get("enabled")):
             stride = int(self.cfg["metric_reloc"].get("apply_every", 1))
             if self._set_count % stride == 0:

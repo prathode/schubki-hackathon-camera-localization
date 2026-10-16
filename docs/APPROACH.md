@@ -156,10 +156,42 @@ remove.
    quality, inlier ratio, localization error and runtime on identical frames
    and only promote a component that measurably improves the official score.
 
-2. Learned drivable-surface segmentation feeding `border_match` for a true
-   lateral/yaw map fix (replaces the classical night detector of §4.2).
+   **Triangulated 3D landmark map + PnP** (implemented; `pnp_reloc`). The
+   strongest absolute fix: adjacent training keyframes are matched and
+   triangulated (with their GT poses) into a sparse 3D point cloud
+   (`scripts/build_landmark_map.py`); at test time the query's 2D matches to
+   nearby landmarks are solved with PnP+RANSAC for a direct metric pose, with
+   no accumulated VO drift. The triangulation + PnP geometry is unit-tested on
+   synthetic data (`tests/test_landmarks.py`, sub-0.5 m). The pipeline prefers
+   PnP when a landmark map is present and falls back to the essential-matrix
+   relocalizer otherwise.
+
+   **LoMa as a benchmarked alternative matcher** (implemented;
+   `metric_reloc.matcher=loma-b|loma-l|loma-g`). `scripts/benchmark_matchers.py`
+   compares ALIKED+LightGlue vs LoMa on identical cross-lap frame pairs
+   (match count, inlier ratio, relative-yaw error, runtime). Promote a matcher
+   only if it measurably wins -- do not assume the newer model is better.
+
+2. **Learned drivable-surface segmentation** feeding `border_match`
+   (implemented; `segmentation.enabled=true`, torchvision DeepLabV3). It
+   replaces the classical night detector of §4.2 with clean road-boundary
+   pixels, so the (validated) ground-projection + map-ICP geometry gets
+   trustworthy input. A track-surface-specific fine-tuned segmenter is the
+   recommended further upgrade.
 3. With a reliable absolute fix in place, re-enable `tangent_yaw` safely for
    extra heading stability.
+
+### Component map (the brief's four methods, all implemented)
+
+| Brief method | Module | Default | Needs GPU |
+|---|---|---|---|
+| 1. Visual odometry (motion model) | `localization/motion.py` + EKF | on | no |
+| 2. Track-border matching | `perception/border_matcher.py` (+ `segmentation.py`) | off | optional |
+| 3. Reference-map relocalization | `perception/metric_reloc.py`, `landmarks.py` (ALIKED+LightGlue / LoMa / PnP) | off | yes |
+| 4. Causal filter fusion | `localization/ekf.py` + `pipeline.py` | on | no |
+
+All four are present and fuse through the one causal EKF; the GPU-dependent
+absolute-correction paths are off by default and enabled per the README.
 
 ### Device safety
 

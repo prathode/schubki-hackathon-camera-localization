@@ -79,12 +79,21 @@ tangent_yaw:
   max_pos_cov: 4.0         # skip update when EKF position covariance exceeds
 
 # Track-border matching (the main lateral/yaw corrector).
+# Learned drivable-surface segmentation feeding the border matcher. When
+# enabled, clean road-boundary pixels replace the classical night detector.
+# DECLARED EXTERNAL MODEL: torchvision DeepLabV3 (pretrained). GPU-optional.
+segmentation:
+  enabled: false
+  backend: "deeplabv3"
+  model: "mobilenet"       # mobilenet | resnet50
+  infer_size: 512
+
 border_match:
   # DISABLED by default. Classical night-time track-edge detection is too
   # noisy (projected off-road/barrier points corrupt the ICP), making the
-  # score WORSE on validation (see docs/APPROACH.md). Kept for the GPU path:
-  # replace border_detect with a learned drivable-surface segmentation and
-  # re-enable. Geometry (ground projection + map ICP) is validated.
+  # score WORSE on validation (see docs/APPROACH.md). Enable together with
+  # segmentation.enabled=true for the learned road-boundary front-end, which
+  # feeds clean ground-plane border pixels into the (validated) ICP geometry.
   enabled: false
   # cameras used for ground-plane border projection (most reliable calib).
   cams: ["fl", "fr", "r", "rl"]
@@ -108,6 +117,7 @@ features:
 # baseline -- validate on your single-GPU workstation.
 metric_reloc:
   enabled: false
+  matcher: "aliked_lightglue"   # aliked_lightglue | loma-b | loma-l | loma-g
   db_path: "outputs/feature_db.pkl"
   cams: ["fl"]             # reliable, forward-facing; add "r"/"rl" if helpful
   build_stride: 5          # sample every Nth image set for keyframes
@@ -117,6 +127,21 @@ metric_reloc:
   baseline_m: 2.0          # scale prior for the essential-matrix translation
   r_pos: 4.0
   r_yaw: 0.03
+  gate_dist_m: 15.0
+  apply_every: 2
+
+# PnP relocalization against a sparse triangulated 3D landmark map. Strongest
+# absolute fix (metric pose, no VO drift). DISABLED by default; build the map
+# with scripts/build_landmark_map.py. Preferred over metric_reloc when a
+# landmark map is present. GPU recommended for feature extraction.
+pnp_reloc:
+  enabled: false
+  map_paths: {}            # e.g. {fl: outputs/landmarks_fl.npz}
+  cams: ["fl"]
+  search_radius_m: 25.0
+  min_inliers: 20
+  r_pos: 2.0
+  r_yaw: 0.02
   gate_dist_m: 15.0
   apply_every: 2
 

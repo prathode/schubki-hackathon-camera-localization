@@ -31,7 +31,14 @@ def build_border_matcher(cfg, calib, track):
     if not cfg["border_match"]["enabled"]:
         return None
     from camloc.perception.border_matcher import BorderMatcher
-    return BorderMatcher(cfg, calib, track)
+    segmenter = None
+    if cfg.get("segmentation", {}).get("enabled"):
+        from camloc.perception.segmentation import build_segmenter
+        segmenter = build_segmenter(cfg)
+        if segmenter is not None:
+            print(f"[border] using learned segmentation "
+                  f"({cfg['segmentation']['backend']}/{cfg['segmentation'].get('model')})")
+    return BorderMatcher(cfg, calib, track, segmenter=segmenter)
 
 
 def build_metric_reloc(cfg, calib):
@@ -50,10 +57,36 @@ def build_metric_reloc(cfg, calib):
         dbs = pickle.load(f)
     for db in dbs.values():
         db.build_index()
+    # feature DB stores ALIKED descriptors, so the extractor must match.
     fx = AlikedLightGlue(cfg)
     print(f"[metric_reloc] loaded DBs: "
           f"{{ {', '.join(f'{c}:{len(db.poses)}' for c, db in dbs.items())} }}")
     return MetricRelocalizer(cfg, dbs, calib, fx)
+
+
+def build_pnp_reloc(cfg, calib):
+    pc = cfg.get("pnp_reloc", {})
+    if not pc.get("enabled"):
+        return None
+    map_paths = pc.get("map_paths") or {}
+    if not map_paths:
+        print("[pnp_reloc] no map_paths configured; disabling.")
+        return None
+    from camloc.perception.landmarks import LandmarkMap, PnPRelocalizer
+    from camloc.perception.features import AlikedLightGlue
+    maps = {}
+    for cam, path in map_paths.items():
+        if not os.path.exists(path):
+            print(f"[pnp_reloc] map for {cam} not found at {path}; skipping.")
+            continue
+        maps[cam] = LandmarkMap.load(path)
+    if not maps:
+        print("[pnp_reloc] no landmark maps loaded; disabling.")
+        return None
+    fx = AlikedLightGlue(cfg)
+    print(f"[pnp_reloc] loaded maps: "
+          f"{{ {', '.join(f'{c}:{len(m.points3d)}' for c, m in maps.items())} }}")
+    return PnPRelocalizer(cfg, maps, calib, fx)
 
 
 def build_relocalizer(cfg):
@@ -154,8 +187,9 @@ def main():
         from camloc.localization.tangent_yaw import TangentYawCorrector
         tangent = TangentYawCorrector(cfg, track)
     metric = build_metric_reloc(cfg, calib)
+    pnp = build_pnp_reloc(cfg, calib)
     loc = Localizer(cfg, border_matcher=matcher, relocalizer=relocalizer,
-                    tangent_yaw=tangent, metric_reloc=metric)
+                    tangent_yaw=tangent, metric_reloc=metric, pnp_reloc=pnp)
     loc.initialize(x, y, yaw)
 
     def on_log(n, est):
