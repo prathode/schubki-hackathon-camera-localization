@@ -93,6 +93,33 @@ border_match:
   min_points: 30          # need at least this many border px to attempt match
   icp_iters: 8
 
+# Learned local features (ALIKED + LightGlue) for metric relocalization.
+# DECLARED EXTERNAL MODELS: ALIKED (BSD-3), LightGlue (Apache-2.0), pretrained.
+# GPU-optional; on Pascal (P5200) FlashAttention is auto-disabled.
+features:
+  max_keypoints: 1024
+  resize: 1024             # longer-side resize before extraction
+  filter_threshold: 0.1    # LightGlue match confidence
+
+# Metric visual relocalization: ALIKED+LightGlue match to training keyframes
+# + essential-matrix relative pose -> absolute (x,y,yaw) fix, EKF-gated.
+# DISABLED by default; needs the feature DB (scripts/build_feature_db.py) and
+# a GPU for practical runtime. This is the primary path to beat the motion
+# baseline -- validate on your single-GPU workstation.
+metric_reloc:
+  enabled: false
+  db_path: "outputs/feature_db.pkl"
+  cams: ["fl"]             # reliable, forward-facing; add "r"/"rl" if helpful
+  build_stride: 5          # sample every Nth image set for keyframes
+  search_radius_m: 15.0    # restrict candidate keyframes near the prediction
+  topk: 3
+  min_inliers: 25
+  baseline_m: 2.0          # scale prior for the essential-matrix translation
+  r_pos: 4.0
+  r_yaw: 0.03
+  gate_dist_m: 15.0
+  apply_every: 2
+
 # Visual relocalization against a training-run database (coarse absolute fix).
 # The DB is built offline from training GT (permitted for map-building) and
 # loaded read-only at inference. Gated so it only bounds drift.
@@ -124,4 +151,6 @@ output:
 
 runtime:
   log_every: 500
-  device: "cpu"           # cpu | cuda  (GPU-optional; sandbox is CPU-only)
+  # auto | cpu | cuda | cuda:N. 'auto' uses the GPU when available and falls
+  # back to CPU otherwise. Any CUDA failure degrades to CPU (never crashes).
+  device: "auto"

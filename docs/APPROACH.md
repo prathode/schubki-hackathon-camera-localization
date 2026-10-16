@@ -129,12 +129,41 @@ remove.
 
 ## 5. What a GPU run should add (next steps on the target workstation)
 
-1. DINOv2 descriptor for relocalization (`reloc.descriptor=dinov2`), validated
-   for cross-session transfer on the held-out laps.
+1. **Metric visual relocalization with ALIKED + LightGlue** (implemented;
+   `metric_reloc.enabled=true`). This is the highest-expected-gain component
+   and directly attacks the residual drift of §4.4. Why it should beat the
+   coarse descriptors of §4.3: instead of a fuzzy nearest-pose lookup it
+   performs *learned feature matching* (robust to night / low texture /
+   viewpoint change) followed by essential-matrix / PnP geometry for a
+   *metric* pose, giving a true absolute `(x, y, yaw)` fix rather than a
+   ~18 m retrieval guess.
+
+   Pipeline: keyframe DB of ALIKED features + training GT poses (built
+   offline, permitted) → restrict candidates to the EKF-predicted
+   neighbourhood (avoids wrong-section matches) → LightGlue match → relative
+   pose → absolute fix → **EKF-gated** (inliers, reprojection, distance from
+   prediction), so a bad match can only be rejected, never corrupt the state.
+
+   *Caveat (measured concern, must be validated on the GPU):* the keyframes
+   come from the training session; the hidden test is a *different* session
+   with possibly different lighting/speed. Retrieval/matching may degrade
+   there. The hard EKF gating bounds the downside, but cross-session transfer
+   must be checked on the held-out laps before trusting it. This repo cannot
+   measure its accuracy (CPU-only sandbox); it is wired and runnable, and the
+   numbers come from the single-GPU workstation.
+
+   *Benchmark LoMa / learned VO as alternatives*, not defaults: measure match
+   quality, inlier ratio, localization error and runtime on identical frames
+   and only promote a component that measurably improves the official score.
+
 2. Learned drivable-surface segmentation feeding `border_match` for a true
-   lateral/yaw map fix.
+   lateral/yaw map fix (replaces the classical night detector of §4.2).
 3. With a reliable absolute fix in place, re-enable `tangent_yaw` safely for
    extra heading stability.
 
-All three are implemented behind config flags; only the learned front-ends
-require the GPU.
+### Device safety
+
+All learned components resolve their device through `perception/device.py`
+(`resolve_device` / `to_device`): `runtime.device=auto|cpu|cuda|cuda:N`, with
+automatic CPU fallback on any CUDA failure (unavailable, OOM, driver, Pascal
+FlashAttention). The default pipeline needs no GPU and no external weights.

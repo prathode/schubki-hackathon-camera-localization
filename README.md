@@ -75,15 +75,45 @@ See `docs/APPROACH.md` for the full method, ablations, and **failure analysis**
 
 Optional, **disabled-by-default** correctors (see `docs/APPROACH.md`):
 
+- **Metric visual relocalization (ALIKED + LightGlue)** — match the live
+  frame to training keyframes, recover relative pose (essential matrix /
+  PnP), and apply an absolute `(x, y, yaw)` fix. This is the primary path to
+  beat the motion baseline; it needs a GPU and the feature DB. See
+  "GPU relocalization" below.
 - **Map-tangent yaw correction** — anchors heading to the track direction.
   Helps on a clean lap but diverges globally without a reliable position
   source; kept behind a flag.
 - **Track-border matching** — geometry is validated (ground projection + map
   ICP), but classical night-time edge detection is too noisy; ready for a
   learned segmentation front-end on a GPU.
-- **Visual relocalization** — database built offline from training GT
-  (permitted for map building). The CPU thumbnail descriptor is too coarse;
-  swap in DINOv2 on a GPU (`reloc.descriptor=dinov2`).
+- **Coarse retrieval relocalization** — thumbnail (CPU) or DINOv2 (GPU)
+  global descriptor; a cheaper coarse prior than the metric path.
+
+### Device handling (GPU-optional, fail-safe)
+
+`runtime.device` accepts `auto` (default), `cpu`, `cuda`, or `cuda:N`. All
+learned models are moved through a single `to_device()` helper that **falls
+back to CPU automatically** if CUDA is unavailable or the GPU move fails
+(driver mismatch, OOM, Pascal/FlashAttention quirks) — the pipeline never
+crashes because of the GPU. On a Pascal card (P5200) FlashAttention is
+auto-disabled and mixed precision is left off.
+
+### GPU relocalization (ALIKED + LightGlue) — on your workstation
+
+```bash
+# install the optional deps (CUDA torch + LightGlue, which bundles ALIKED)
+pip install "lightglue @ git+https://github.com/cvg/LightGlue.git"
+
+# 1) build the keyframe feature DB from the training run (uses training GT
+#    for map-building only; exclude held-out laps)
+python scripts/build_feature_db.py --mcap "$MCAP" \
+    --out outputs/feature_db.pkl --set runtime.device=cuda \
+    --exclude-start-s 680 --exclude-end-s 1063
+
+# 2) run with metric relocalization enabled
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set metric_reloc.enabled=true --set runtime.device=cuda
+```
 
 ---
 

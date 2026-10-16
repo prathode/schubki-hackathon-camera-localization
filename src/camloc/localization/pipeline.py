@@ -38,12 +38,13 @@ class PoseEstimate:
 
 class Localizer:
     def __init__(self, cfg: dict, border_matcher=None, relocalizer=None,
-                 tangent_yaw=None):
+                 tangent_yaw=None, metric_reloc=None):
         self.cfg = cfg
         self.motion = MotionIntegrator(cfg)
         self.ekf = PoseEKF(cfg)
         self.border = border_matcher
         self.reloc = relocalizer
+        self.metric_reloc = metric_reloc
         self.tangent = tangent_yaw
         self._last_state_ns: Optional[int] = None
         self._set_count = 0
@@ -121,6 +122,18 @@ class Localizer:
                 if tr.ok:
                     self.ekf.update_yaw_ref(tr.yaw_ref, self.tangent.r_yaw)
                     source = "tangent"
+
+        # ---- metric relocalization (ALIKED+LightGlue): absolute fix (gated) ----
+        if (self.metric_reloc is not None
+                and self.cfg.get("metric_reloc", {}).get("enabled")):
+            stride = int(self.cfg["metric_reloc"].get("apply_every", 1))
+            if self._set_count % stride == 0:
+                mr = self.metric_reloc.query(iset, self.ekf.pose)
+                if mr.ok and mr.n_inliers >= self.cfg["metric_reloc"]["min_inliers"]:
+                    self.ekf.update_position(mr.x, mr.y, mr.r_pos)
+                    self.ekf.update_yaw_ref(mr.yaw, mr.r_yaw)
+                    source = "metric_reloc"
+                    n_pts = mr.n_inliers
 
         # ---- relocalization: coarse absolute position fix (gated) ----
         if self.reloc is not None and self.cfg.get("reloc", {}).get("enabled"):

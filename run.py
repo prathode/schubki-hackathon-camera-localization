@@ -34,6 +34,28 @@ def build_border_matcher(cfg, calib, track):
     return BorderMatcher(cfg, calib, track)
 
 
+def build_metric_reloc(cfg, calib):
+    mc = cfg.get("metric_reloc", {})
+    if not mc.get("enabled"):
+        return None
+    db_path = mc["db_path"]
+    if not os.path.exists(db_path):
+        print(f"[metric_reloc] DB not found at {db_path}; disabling. "
+              f"Build it with scripts/build_feature_db.py")
+        return None
+    import pickle
+    from camloc.perception.features import AlikedLightGlue
+    from camloc.perception.metric_reloc import MetricRelocalizer
+    with open(db_path, "rb") as f:
+        dbs = pickle.load(f)
+    for db in dbs.values():
+        db.build_index()
+    fx = AlikedLightGlue(cfg)
+    print(f"[metric_reloc] loaded DBs: "
+          f"{{ {', '.join(f'{c}:{len(db.poses)}' for c, db in dbs.items())} }}")
+    return MetricRelocalizer(cfg, dbs, calib, fx)
+
+
 def build_relocalizer(cfg):
     rc = cfg.get("reloc", {})
     if not rc.get("enabled"):
@@ -131,8 +153,9 @@ def main():
     if cfg.get("tangent_yaw", {}).get("enabled", True):
         from camloc.localization.tangent_yaw import TangentYawCorrector
         tangent = TangentYawCorrector(cfg, track)
+    metric = build_metric_reloc(cfg, calib)
     loc = Localizer(cfg, border_matcher=matcher, relocalizer=relocalizer,
-                    tangent_yaw=tangent)
+                    tangent_yaw=tangent, metric_reloc=metric)
     loc.initialize(x, y, yaw)
 
     def on_log(n, est):

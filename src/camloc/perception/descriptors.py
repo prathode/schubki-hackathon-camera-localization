@@ -59,15 +59,16 @@ class DinoV2Descriptor:
     recognition. No ground truth involved.
     """
 
-    def __init__(self, cams: List[str], device: str = "cuda",
+    def __init__(self, cams: List[str], device: str = "auto",
                  model: str = "dinov2_vits14", img_size: int = 224):
         import torch  # noqa
+        from .device import to_device
         self.torch = torch
         self.cams = cams
-        self.device = device
         self.img_size = img_size
-        self.model = torch.hub.load("facebookresearch/dinov2", model)
-        self.model.eval().to(device)
+        net = torch.hub.load("facebookresearch/dinov2", model).eval()
+        # fail-safe device move: GPU trouble -> CPU instead of a crash.
+        self.model, self.device = to_device(net, device)
         self.mean = np.array([0.485, 0.456, 0.406], np.float32)
         self.std = np.array([0.229, 0.224, 0.225], np.float32)
         # per-camera embedding dim known after a dry run
@@ -111,7 +112,7 @@ def build_descriptor(cfg: dict):
     rc = cfg.get("reloc", {})
     kind = rc.get("descriptor", "thumb")
     if kind == "dinov2":
-        device = cfg.get("runtime", {}).get("device", "cpu")
+        device = cfg.get("runtime", {}).get("device", "auto")
         return DinoV2Descriptor(cams, device=device,
                                 model=rc.get("dino_model", "dinov2_vits14"))
     return ThumbnailDescriptor(cams)
