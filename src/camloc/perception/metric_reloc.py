@@ -89,6 +89,8 @@ class MetricRelocResult:
     confidence: float = 0.0
     r_pos: float = 4.0
     r_yaw: float = 0.05
+    r_lat: float = 0.4
+    r_lon: float = 1.5
 
 
 class MetricRelocalizer:

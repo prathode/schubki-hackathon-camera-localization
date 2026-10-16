@@ -32,6 +32,13 @@ def _coerce(v: str) -> Any:
         return float(v)
     except ValueError:
         pass
+    # inline YAML dict/list (e.g. "{fl: path.npz}" or "[fl, fr]")
+    s = v.strip()
+    if s[:1] in ("{", "["):
+        try:
+            return yaml.safe_load(v)
+        except Exception:
+            pass
     return v
 
 

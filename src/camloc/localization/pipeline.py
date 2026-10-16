@@ -132,7 +132,10 @@ class Localizer:
             if self._set_count % stride == 0:
                 pr = self.pnp_reloc.query(iset, self.ekf.pose)
                 if pr.ok and pr.n_inliers >= self.cfg["pnp_reloc"]["min_inliers"]:
-                    self.ekf.update_position(pr.x, pr.y, pr.r_pos)
+                    # anisotropic: trust lateral >> longitudinal
+                    self.ekf.update_position_aniso(
+                        pr.x, pr.y, r_lat=pr.r_lat, r_lon=pr.r_lon,
+                        heading=pr.yaw)
                     self.ekf.update_yaw_ref(pr.yaw, pr.r_yaw)
                     source = "pnp"
                     n_pts = pr.n_inliers

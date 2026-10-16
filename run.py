@@ -73,7 +73,7 @@ def build_pnp_reloc(cfg, calib):
         print("[pnp_reloc] no map_paths configured; disabling.")
         return None
     from camloc.perception.landmarks import LandmarkMap, PnPRelocalizer
-    from camloc.perception.features import AlikedLightGlue
+    from camloc.perception.matchers import build_matcher
     maps = {}
     for cam, path in map_paths.items():
         if not os.path.exists(path):
@@ -83,7 +83,8 @@ def build_pnp_reloc(cfg, calib):
     if not maps:
         print("[pnp_reloc] no landmark maps loaded; disabling.")
         return None
-    fx = AlikedLightGlue(cfg)
+    fx = build_matcher(cfg, pc.get("matcher"))
+    print(f"[pnp_reloc] matcher={fx.name}")
     print(f"[pnp_reloc] loaded maps: "
           f"{{ {', '.join(f'{c}:{len(m.points3d)}' for c, m in maps.items())} }}")
     return PnPRelocalizer(cfg, maps, calib, fx)

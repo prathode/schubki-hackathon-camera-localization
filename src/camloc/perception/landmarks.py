@@ -40,6 +40,7 @@ class LandmarkMap:
     points3d: np.ndarray                 # (M,3) in map frame
     descriptors: np.ndarray              # (M,D) representative descriptor
     obs_xy: np.ndarray                   # (M,2) map xy of the landmark (for KD)
+    view_yaw: Optional[np.ndarray] = None  # (M,) heading it was observed from
     _tree: Optional[object] = None
 
     def build_index(self):
@@ -47,25 +48,54 @@ class LandmarkMap:
             self._tree = cKDTree(self.obs_xy)
         return self
 
-    def near(self, xy, radius):
+    def near(self, xy, radius, heading=None, max_dyaw=None):
+        """Landmark indices within `radius` of xy, optionally filtered to
+        those observed from a similar heading (|dyaw| <= max_dyaw)."""
         if self._tree is None:
             d = np.hypot(self.obs_xy[:, 0] - xy[0], self.obs_xy[:, 1] - xy[1])
-            return np.nonzero(d <= radius)[0]
-        return np.array(self._tree.query_ball_point(xy, radius), dtype=int)
+            idx = np.nonzero(d <= radius)[0]
+        else:
+            idx = np.array(self._tree.query_ball_point(xy, radius), dtype=int)
+        if (heading is not None and max_dyaw is not None
+                and self.view_yaw is not None and len(idx)):
+            dy = np.angle(np.exp(1j * (self.view_yaw[idx] - heading)))
+            idx = idx[np.abs(dy) <= max_dyaw]
+        return idx
 
     def save(self, path):
         import os
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        vy = self.view_yaw if self.view_yaw is not None else np.zeros(len(self.points3d))
         np.savez_compressed(path, points3d=self.points3d,
                             descriptors=self.descriptors.astype(np.float32),
-                            obs_xy=self.obs_xy, cam=np.array([self.cam]))
+                            obs_xy=self.obs_xy, view_yaw=vy,
+                            cam=np.array([self.cam]))
 
     @staticmethod
     def load(path):
         z = np.load(path, allow_pickle=True)
+        vy = z["view_yaw"] if "view_yaw" in z.files else None
         return LandmarkMap(cam=str(z["cam"][0]), points3d=z["points3d"],
-                           descriptors=z["descriptors"],
-                           obs_xy=z["obs_xy"]).build_index()
+                           descriptors=z["descriptors"], obs_xy=z["obs_xy"],
+                           view_yaw=vy).build_index()
+
+
+def voxel_dedup(points3d: np.ndarray, descriptors: np.ndarray,
+                voxel: float = 0.5, view_yaw: Optional[np.ndarray] = None):
+    """Deduplicate landmarks into `voxel`-metre cells, keeping one per cell.
+
+    Returns (points, descriptors[, view_yaw]) with one representative per
+    occupied voxel. Mirrors the reference recipe's 0.5 m voxel dedup.
+    """
+    if len(points3d) == 0:
+        return (points3d, descriptors) if view_yaw is None else (
+            points3d, descriptors, view_yaw)
+    keys = np.floor(points3d / voxel).astype(np.int64)
+    _, idx = np.unique(keys, axis=0, return_index=True)
+    idx.sort()
+    if view_yaw is None:
+        return points3d[idx], descriptors[idx]
+    return points3d[idx], descriptors[idx], view_yaw[idx]
 
 
 def _T_map_cam(pose_bl, extr):
@@ -132,6 +162,9 @@ class PnPRelocalizer:
         self.gate_dist = float(pc.get("gate_dist_m", 15.0))
         self.reproj_err = float(pc.get("reproj_err_px", 2.0))
         self.match_ratio = float(pc.get("match_ratio", 0.85))
+        self.max_dyaw = np.radians(float(pc.get("heading_tol_deg", 35.0)))
+        self.r_lat = float(pc.get("r_lat", 0.4))
+        self.r_lon = float(pc.get("r_lon", 1.5))
 
     def query(self, iset, predicted_pose):
         from .metric_reloc import MetricRelocResult
@@ -142,7 +175,8 @@ class PnPRelocalizer:
             m = iset.get(cam)
             if lm is None or m is None or cam not in self.calib:
                 continue
-            idx = lm.near(predicted_pose[:2], self.search_radius)
+            idx = lm.near(predicted_pose[:2], self.search_radius,
+                          heading=predicted_pose[2], max_dyaw=self.max_dyaw)
             if len(idx) < self.min_inliers:
                 continue
             cc = self.calib[cam]
@@ -195,10 +229,14 @@ class PnPRelocalizer:
         y = float(T_map_bl[1, 3])
         yaw = float(np.arctan2(T_map_bl[1, 0], T_map_bl[0, 0]))
         n = int(len(inliers))
-        r_pos = self.r_pos * max(1.0, 25.0 / max(n, 1))
-        return MetricRelocResult(ok=True, x=x, y=y, yaw=yaw, n_inliers=n,
-                                 confidence=n / max(len(pts2d), 1),
-                                 r_pos=r_pos, r_yaw=self.r_yaw)
+        q = max(1.0, 25.0 / max(n, 1))      # scale noise down with more inliers
+        res = MetricRelocResult(ok=True, x=x, y=y, yaw=yaw, n_inliers=n,
+                                confidence=n / max(len(pts2d), 1),
+                                r_pos=self.r_pos * q, r_yaw=self.r_yaw)
+        # anisotropic noise for the filter (lateral trusted >> longitudinal)
+        res.r_lat = self.r_lat * q
+        res.r_lon = self.r_lon * q
+        return res
 
 
 def _mutual_nn(desc_q, desc_m, ratio=0.9):

@@ -87,6 +87,36 @@ class PoseEKF:
         self.P = (np.eye(3) - K @ H) @ self.P
         return True
 
+    def update_position_aniso(self, x_meas: float, y_meas: float,
+                              r_lat: float, r_lon: float,
+                              heading: float = None, gate_m: float = 20.0) -> bool:
+        """Position update with anisotropic noise along/across the heading.
+
+        Lateral error (across heading) is trusted more than longitudinal
+        (along heading): a border/landmark fix pins the cross-track position
+        tightly but the along-track position is weakly observable on
+        straights. r_lat << r_lon (e.g. 0.4 m vs 1.5 m).
+        """
+        h = self.x[2] if heading is None else heading
+        z = np.array([x_meas - self.x[0], y_meas - self.x[1]])
+        pos_sigma = np.sqrt(self.P[0, 0] + self.P[1, 1])
+        gate = max(float(gate_m), 4.0 * pos_sigma)
+        if np.hypot(*z) > gate:
+            return False
+        # rotation from map to (lon, lat) body axes
+        c, s = np.cos(h), np.sin(h)
+        Rb = np.array([[c, s], [-s, c]])         # map -> body (lon, lat)
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        # measurement covariance in body frame -> map frame
+        Rbody = np.diag([r_lon ** 2, r_lat ** 2])
+        Rmap = Rb.T @ Rbody @ Rb
+        S = H @ self.P @ H.T + Rmap
+        K = self.P @ H.T @ np.linalg.inv(S)
+        self.x = self.x + K @ z
+        self.x[2] = wrap(self.x[2])
+        self.P = (np.eye(3) - K @ H) @ self.P
+        return True
+
     def update_yaw_ref(self, yaw_ref: float, r_yaw: float) -> bool:
         """Absolute heading correction toward yaw_ref (gated by caller)."""
         innov = wrap(yaw_ref - self.x[2])
