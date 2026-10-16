@@ -100,12 +100,18 @@ class PoseEKF:
         return True
 
     def update_position(self, x_meas: float, y_meas: float,
-                        r_pos: float) -> bool:
+                        r_pos: float, gate_m: float = 20.0) -> bool:
         """Absolute (x,y) correction, e.g. from relocalization."""
         H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
         R = np.diag([r_pos ** 2, r_pos ** 2])
         z = np.array([x_meas - self.x[0], y_meas - self.x[1]])
-        if np.hypot(*z) > 5.0:  # hard outlier gate
+        # Outlier gate scaled by the current position uncertainty: when the
+        # filter has drifted (large covariance) a larger absolute correction
+        # is legitimate and must not be rejected. A fixed small gate would
+        # block exactly the loop-closure fixes that bound drift.
+        pos_sigma = np.sqrt(self.P[0, 0] + self.P[1, 1])
+        gate = max(float(gate_m), 4.0 * pos_sigma)
+        if np.hypot(*z) > gate:
             return False
         S = H @ self.P @ H.T + R
         K = self.P @ H.T @ np.linalg.inv(S)

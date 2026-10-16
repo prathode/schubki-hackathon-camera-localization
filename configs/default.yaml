@@ -137,13 +137,17 @@ metric_reloc:
 pnp_reloc:
   enabled: false
   map_paths: {}            # e.g. {fl: outputs/landmarks_fl.npz}
-  cams: ["fl"]
+  cams: ["fl", "fr"]       # more cameras -> more landmarks -> more fixes
   search_radius_m: 25.0
   min_inliers: 20
-  r_pos: 2.0
-  r_yaw: 0.02
+  reproj_err_px: 2.0       # RANSAC inlier threshold (tight for accuracy)
+  match_ratio: 0.85        # Lowe ratio for descriptor matching
+  # sub-metre measurement noise so a confident PnP fix pulls the pose hard;
+  # validated: PnP gives ~0.1 m median at 0.5 px matching (real fl calib).
+  r_pos: 0.3
+  r_yaw: 0.01
   gate_dist_m: 15.0
-  apply_every: 2
+  apply_every: 1           # apply every image set for continuous correction
 
 # Visual relocalization against a training-run database (coarse absolute fix).
 # The DB is built offline from training GT (permitted for map-building) and
