@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Hackathon dataset & local artifacts (do NOT commit large data) ----
+/dataset/
+dataset/
+*.mcap
+*.zip
+.venv/
+outputs/*.csv
+outputs/*.png
+outputs/*.mp4
+outputs/*.npz
+!outputs/.gitkeep
