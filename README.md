@@ -15,21 +15,35 @@ signals only. No GNSS, LiDAR, radar, or ground-truth pose is used at inference
 ## TL;DR — one command
 
 ```bash
-# 1. environment
+# environment
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. produce the submission CSV from the raw MCAP
-python run.py --mcap /path/to/run.mcap --out outputs/submission.csv
+# one command: raw MCAP -> submission CSV (+ auto-score if the dataset
+# tools/ folder is found next to the mcap)
+./run.sh /path/to/run.mcap                 # baseline (motion+ZUPT, CPU)
 ```
 
-That writes `outputs/submission.csv` with the header
-`timestamp_ns,x,y,yaw` — one pose per image set, 10 Hz, 100 % coverage.
-
-Score it with the organizer's evaluator:
+`run.sh` auto-locates the starter-kit `tools/` (extract_gt.py, evaluate.py),
+extracts ground truth, runs localization, and prints the evaluator score —
+the single-command reproduction the challenge requires. Modes:
 
 ```bash
-python3 tools/evaluate.py gt.csv outputs/submission.csv   # tools/ is in the dataset zip
+./run.sh run.mcap baseline     # motion + ZUPT only (CPU, robust fallback)
+MATCHER=aliked_lightglue DEVICE=cuda CAMS="fl fr cl cr" \
+  ./run.sh run.mcap full       # build ALIKED landmark maps + PnP (GPU) -> sub-metre target
+./run.sh run.mcap validate     # full pipeline on a held-out lap, with scoring
+```
+
+Key env overrides: `DEVICE` (auto|cpu|cuda|cuda:N), `MATCHER`
+(aliked_lightglue|sift), `CAMS`, `STRIDE` (1 = densest map), `OUT`,
+`VAL_START`/`VAL_END`, `EXCLUDE_START`/`EXCLUDE_END`, `REBUILD=1`.
+
+Equivalent explicit calls (what `run.sh` runs under the hood):
+
+```bash
+python run.py --mcap /path/to/run.mcap --out outputs/submission.csv   # baseline
+python3 tools/evaluate.py gt.csv outputs/submission.csv               # score
 ```
 
 ---
