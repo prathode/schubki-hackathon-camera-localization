@@ -11,8 +11,36 @@ commands in the README. Runtime measured on the CPU-only dev sandbox
 |---|---|---|---|---|---|---|
 | Dead reckoning (no ZUPT), full run | 64.40 | 50.30 | 40.21 | 8.54 | 2.0% | 100% |
 | **Default (motion + ZUPT), full run** | **37.44** | 29.35 | 23.26 | 4.70 | 2.0% | 100% |
-| Validation lap A (680–833 s) | 10.98 | 8.98 | 6.33 | 1.29 | 12.2% | n/a* |
-| Validation lap B (953–1063 s) | 9.63 | 7.94 | 5.44 | 1.36 | 14.7% | n/a* |
+| Validation lap (680–833 s) | 10.98 | 8.98 | 6.33 | 1.29 | 12.2% | n/a* |
+| Validation lap (953–1063 s) | 9.63 | 7.94 | 5.44 | 1.36 | 14.7% | n/a* |
+
+## Train / validation split (guideline: hold out 2 laps)
+
+The dataset is **one recording of one track** (Yas Marina North, 1194 s, night)
+in which the car drives **8 laps**. Lap boundaries (start/finish crossings) and
+average speeds:
+
+| Lap | Window | Avg speed | Role |
+|---|---|---|---|
+| 1 | 0–288 s | 10.4 m/s | train (out-lap) |
+| 2 | 288–455 s | 17.9 m/s | train |
+| **3** | **455–579 s** | 24.5 m/s | **VALIDATION (held out)** |
+| 4 | 579–680 s | 29.4 m/s | train |
+| 5 | 680–833 s | 19.5 m/s | train |
+| 6 | 833–953 s | 24.8 m/s | train |
+| **7** | **953–1063 s** | 27.2 m/s | **VALIDATION (held out, fast lap)** |
+| 8 | 1063–1194 s | — | train (in-lap) |
+
+The canonical split holds out **two laps — lap 3 and lap 7** — never used to
+build the landmark map or tune parameters (lap 7 is a fast lap, to stress
+high-speed behaviour). The landmark-map builder excludes both windows
+(`--exclude-window 455:579 --exclude-window 953:1063`), and `run.sh` applies
+this split by default. The remaining ~6 laps build the map.
+
+(The earlier 680–833 s / 953–1063 s numbers above were an initial 2-lap
+hold-out; the canonical guideline-matching split is laps 3 & 7 as above. Both
+are compliant "hold out 2 laps" splits; use laps 3 & 7 for the reference
+comparison.)
 
 \* A ~150 s lap is a window of the 1194 s GT, so the evaluator's coverage
 metric (share of the whole GT window covered) is low by construction; the

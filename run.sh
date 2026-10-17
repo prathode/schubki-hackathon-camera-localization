@@ -47,10 +47,13 @@ MATCHER="${MATCHER:-aliked_lightglue}"
 CAMS="${CAMS:-fl}"
 OUT="${OUT:-outputs/submission.csv}"
 STRIDE="${STRIDE:-1}"
-EXCLUDE_START="${EXCLUDE_START:-680}"
-EXCLUDE_END="${EXCLUDE_END:-1063}"
-VAL_START="${VAL_START:-680}"
-VAL_END="${VAL_END:-833}"
+# Validation split: the two held-out laps (never used to build the map).
+# Canonical = lap 3 (455-579 s) and lap 7 (953-1063 s), matching the "keep the
+# last laps for validation" guideline (lap 7 is the fast lap).
+VAL_LAP3="${VAL_LAP3:-455:579}"
+VAL_LAP7="${VAL_LAP7:-953:1063}"
+# which lap to score in `validate` mode (3 or 7)
+VAL_LAP="${VAL_LAP:-7}"
 MAP_DIR="${MAP_DIR:-outputs/maps}"
 GT="${GT:-outputs/gt.csv}"
 
@@ -85,11 +88,11 @@ build_maps() {
   for cam in ${CAMS}; do
     local mp="${MAP_DIR}/lm_${cam}.npz"
     if [[ "${REBUILD:-0}" == "1" || ! -f "${mp}" ]]; then
-      echo ">>> [map] building landmark map for camera ${cam} ..."
+      echo ">>> [map] building landmark map for camera ${cam} (holding out laps 3 & 7) ..."
       "${PY}" scripts/build_landmark_map.py \
         --mcap "${MCAP}" --cam "${cam}" --out "${mp}" \
         --matcher "${MATCHER}" --stride "${STRIDE}" \
-        --exclude-start-s "${EXCLUDE_START}" --exclude-end-s "${EXCLUDE_END}" \
+        --exclude-window "${VAL_LAP3}" --exclude-window "${VAL_LAP7}" \
         --set runtime.device="${DEVICE}"
     else
       echo ">>> [map] reusing existing ${mp} (REBUILD=1 to force)"
@@ -121,9 +124,11 @@ case "${MODE}" in
     ;;
   validate)
     build_maps
-    echo ">>> [run] PnP-fused localization on validation window ${VAL_START}-${VAL_END}s ..."
+    if [[ "${VAL_LAP}" == "3" ]]; then WIN="${VAL_LAP3}"; else WIN="${VAL_LAP7}"; fi
+    VS="${WIN%%:*}"; VE="${WIN##*:}"
+    echo ">>> [run] PnP-fused localization on held-out lap ${VAL_LAP} (${VS}-${VE}s) ..."
     "${PY}" run.py --mcap "${MCAP}" --out "${OUT}" \
-      --start-s "${VAL_START}" --end-s "${VAL_END}" "${extra_run_args[@]}"
+      --start-s "${VS}" --end-s "${VE}" "${extra_run_args[@]}"
     ;;
   *)
     echo "ERROR: unknown mode '${MODE}' (use baseline|full|validate)" >&2; exit 2;;

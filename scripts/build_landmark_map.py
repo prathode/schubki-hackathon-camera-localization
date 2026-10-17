@@ -81,6 +81,9 @@ def main():
                     help="drop landmarks more than this above the track")
     ap.add_argument("--exclude-start-s", type=float, default=None)
     ap.add_argument("--exclude-end-s", type=float, default=None)
+    ap.add_argument("--exclude-window", action="append", default=[],
+                    help="additional 'start:end' seconds window to exclude "
+                         "from the map (repeatable; holds out validation laps)")
     ap.add_argument("--set", action="append", default=[])
     args = ap.parse_args()
 
@@ -94,8 +97,21 @@ def main():
 
     src = McapSource(args.mcap, cfg)
     t0, _ = src.time_bounds()
-    ex0 = None if args.exclude_start_s is None else t0 + int(args.exclude_start_s * 1e9)
-    ex1 = None if args.exclude_end_s is None else t0 + int(args.exclude_end_s * 1e9)
+    # collect all exclusion windows (ns) -- validation laps kept OUT of the map
+    excl = []
+    if args.exclude_start_s is not None and args.exclude_end_s is not None:
+        excl.append((t0 + int(args.exclude_start_s * 1e9),
+                     t0 + int(args.exclude_end_s * 1e9)))
+    for w in args.exclude_window:
+        a, b = w.split(":")
+        excl.append((t0 + int(float(a) * 1e9), t0 + int(float(b) * 1e9)))
+
+    def in_excluded(stamp):
+        return any(a <= stamp <= b for a, b in excl)
+
+    if excl:
+        print(f"[landmark] excluding {len(excl)} validation window(s): "
+              + ", ".join(f"{(a-t0)/1e9:.0f}-{(b-t0)/1e9:.0f}s" for a, b in excl))
     asm = ImageSetAssembler(cfg)
 
     from collections import deque
@@ -109,7 +125,7 @@ def main():
         n += 1
         if n % args.stride:
             continue
-        if ex0 is not None and ex0 <= msg.stamp_ns <= ex1:
+        if in_excluded(msg.stamp_ns):
             buf.clear()
             continue
         m = msg.get(cam)
