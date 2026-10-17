@@ -79,12 +79,21 @@ tangent_yaw:
   max_pos_cov: 4.0         # skip update when EKF position covariance exceeds
 
 # Track-border matching (the main lateral/yaw corrector).
+# Learned drivable-surface segmentation feeding the border matcher. When
+# enabled, clean road-boundary pixels replace the classical night detector.
+# DECLARED EXTERNAL MODEL: torchvision DeepLabV3 (pretrained). GPU-optional.
+segmentation:
+  enabled: false
+  backend: "deeplabv3"
+  model: "mobilenet"       # mobilenet | resnet50
+  infer_size: 512
+
 border_match:
   # DISABLED by default. Classical night-time track-edge detection is too
   # noisy (projected off-road/barrier points corrupt the ICP), making the
-  # score WORSE on validation (see docs/APPROACH.md). Kept for the GPU path:
-  # replace border_detect with a learned drivable-surface segmentation and
-  # re-enable. Geometry (ground projection + map ICP) is validated.
+  # score WORSE on validation (see docs/APPROACH.md). Enable together with
+  # segmentation.enabled=true for the learned road-boundary front-end, which
+  # feeds clean ground-plane border pixels into the (validated) ICP geometry.
   enabled: false
   # cameras used for ground-plane border projection (most reliable calib).
   cams: ["fl", "fr", "r", "rl"]
@@ -92,6 +101,67 @@ border_match:
   max_range_m: 40.0       # ignore projected points beyond this range
   min_points: 30          # need at least this many border px to attempt match
   icp_iters: 8
+
+# Learned local features (ALIKED + LightGlue) for metric relocalization.
+# DECLARED EXTERNAL MODELS: ALIKED (BSD-3), LightGlue (Apache-2.0), pretrained.
+# GPU-optional; on Pascal (P5200) FlashAttention is auto-disabled.
+features:
+  # ALIKED is the recommended extractor (faster + better night/blur features
+  # than SIFT). Use more keypoints for a denser landmark map.
+  max_keypoints: 2048      # ALIKED keypoints per image
+  resize: 1024             # longer-side resize for ALIKED (0 = full res, SIFT)
+  filter_threshold: 0.1    # LightGlue match confidence
+  sift_ratio: 0.75         # Lowe ratio for the SIFT CPU fallback
+
+# Metric visual relocalization: ALIKED+LightGlue match to training keyframes
+# + essential-matrix relative pose -> absolute (x,y,yaw) fix, EKF-gated.
+# DISABLED by default; needs the feature DB (scripts/build_feature_db.py) and
+# a GPU for practical runtime. This is the primary path to beat the motion
+# baseline -- validate on your single-GPU workstation.
+metric_reloc:
+  enabled: false
+  matcher: "aliked_lightglue"   # aliked_lightglue | loma-b | loma-l | loma-g
+  db_path: "outputs/feature_db.pkl"
+  cams: ["fl"]             # reliable, forward-facing; add "r"/"rl" if helpful
+  build_stride: 5          # sample every Nth image set for keyframes
+  search_radius_m: 15.0    # restrict candidate keyframes near the prediction
+  topk: 3
+  min_inliers: 25
+  baseline_m: 2.0          # scale prior for the essential-matrix translation
+  r_pos: 4.0
+  r_yaw: 0.03
+  gate_dist_m: 15.0
+  apply_every: 2
+
+# PnP relocalization against a sparse triangulated 3D landmark map. Strongest
+# absolute fix (metric pose, no VO drift). DISABLED by default; build the map
+# with scripts/build_landmark_map.py. Preferred over metric_reloc when a
+# landmark map is present. GPU recommended for feature extraction.
+# PnP relocalization against a sparse triangulated 3D landmark map. This is
+# the reference winning recipe (SIFT landmarks + PnP + filter): ~0.4 m on the
+# held-out laps. Build maps with scripts/build_landmark_map.py (matcher=sift
+# runs on CPU; aliked_lightglue on GPU). DISABLED by default.
+pnp_reloc:
+  enabled: false
+  # aliked_lightglue (RECOMMENDED: faster + far better features on night /
+  # low-texture / motion-blur images, and dense enough for reliable PnP).
+  # sift is a CPU-only fallback and gives sparser, weaker night features.
+  matcher: "aliked_lightglue"
+  map_paths: {}            # e.g. {fl: outputs/landmarks_fl.npz}
+  cams: ["fl"]
+  search_radius_m: 30.0    # select landmarks within 30 m of the prediction
+  heading_tol_deg: 35.0    # only landmarks observed from a similar heading
+  min_inliers: 15          # >=15 PnP inliers required (reference recipe)
+  reproj_err_px: 2.0       # RANSAC inlier threshold
+  match_ratio: 0.75        # Lowe ratio
+  # anisotropic measurement noise: lateral trusted >> longitudinal, matching
+  # the reference recipe (sigma_lat 0.4 m, sigma_lon 1.5 m).
+  r_lat: 0.4
+  r_lon: 1.5
+  r_pos: 0.4               # (isotropic fallback)
+  r_yaw: 0.01
+  gate_dist_m: 10.0        # drop fixes >10 m from the current estimate
+  apply_every: 1           # apply every image set
 
 # Visual relocalization against a training-run database (coarse absolute fix).
 # The DB is built offline from training GT (permitted for map-building) and
@@ -124,4 +194,6 @@ output:
 
 runtime:
   log_every: 500
-  device: "cpu"           # cpu | cuda  (GPU-optional; sandbox is CPU-only)
+  # auto | cpu | cuda | cuda:N. 'auto' uses the GPU when available and falls
+  # back to CPU otherwise. Any CUDA failure degrades to CPU (never crashes).
+  device: "auto"

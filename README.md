@@ -15,21 +15,35 @@ signals only. No GNSS, LiDAR, radar, or ground-truth pose is used at inference
 ## TL;DR — one command
 
 ```bash
-# 1. environment
+# environment
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. produce the submission CSV from the raw MCAP
-python run.py --mcap /path/to/run.mcap --out outputs/submission.csv
+# one command: raw MCAP -> submission CSV (+ auto-score if the dataset
+# tools/ folder is found next to the mcap)
+./run.sh /path/to/run.mcap                 # baseline (motion+ZUPT, CPU)
 ```
 
-That writes `outputs/submission.csv` with the header
-`timestamp_ns,x,y,yaw` — one pose per image set, 10 Hz, 100 % coverage.
-
-Score it with the organizer's evaluator:
+`run.sh` auto-locates the starter-kit `tools/` (extract_gt.py, evaluate.py),
+extracts ground truth, runs localization, and prints the evaluator score —
+the single-command reproduction the challenge requires. Modes:
 
 ```bash
-python3 tools/evaluate.py gt.csv outputs/submission.csv   # tools/ is in the dataset zip
+./run.sh run.mcap baseline     # motion + ZUPT only (CPU, robust fallback)
+MATCHER=aliked_lightglue DEVICE=cuda CAMS="fl fr cl cr" \
+  ./run.sh run.mcap full       # build ALIKED landmark maps + PnP (GPU) -> sub-metre target
+./run.sh run.mcap validate     # full pipeline on a held-out lap, with scoring
+```
+
+Key env overrides: `DEVICE` (auto|cpu|cuda|cuda:N), `MATCHER`
+(aliked_lightglue|sift), `CAMS`, `STRIDE` (1 = densest map), `OUT`,
+`VAL_START`/`VAL_END`, `EXCLUDE_START`/`EXCLUDE_END`, `REBUILD=1`.
+
+Equivalent explicit calls (what `run.sh` runs under the hood):
+
+```bash
+python run.py --mcap /path/to/run.mcap --out outputs/submission.csv   # baseline
+python3 tools/evaluate.py gt.csv outputs/submission.csv               # score
 ```
 
 ---
@@ -75,15 +89,80 @@ See `docs/APPROACH.md` for the full method, ablations, and **failure analysis**
 
 Optional, **disabled-by-default** correctors (see `docs/APPROACH.md`):
 
+- **Metric visual relocalization (ALIKED + LightGlue)** — match the live
+  frame to training keyframes, recover relative pose (essential matrix /
+  PnP), and apply an absolute `(x, y, yaw)` fix. This is the primary path to
+  beat the motion baseline; it needs a GPU and the feature DB. See
+  "GPU relocalization" below.
 - **Map-tangent yaw correction** — anchors heading to the track direction.
   Helps on a clean lap but diverges globally without a reliable position
   source; kept behind a flag.
 - **Track-border matching** — geometry is validated (ground projection + map
   ICP), but classical night-time edge detection is too noisy; ready for a
   learned segmentation front-end on a GPU.
-- **Visual relocalization** — database built offline from training GT
-  (permitted for map building). The CPU thumbnail descriptor is too coarse;
-  swap in DINOv2 on a GPU (`reloc.descriptor=dinov2`).
+- **Coarse retrieval relocalization** — thumbnail (CPU) or DINOv2 (GPU)
+  global descriptor; a cheaper coarse prior than the metric path.
+
+### Device handling (GPU-optional, fail-safe)
+
+`runtime.device` accepts `auto` (default), `cpu`, `cuda`, or `cuda:N`. All
+learned models are moved through a single `to_device()` helper that **falls
+back to CPU automatically** if CUDA is unavailable or the GPU move fails
+(driver mismatch, OOM, Pascal/FlashAttention quirks) — the pipeline never
+crashes because of the GPU. On a Pascal card (P5200) FlashAttention is
+auto-disabled and mixed precision is left off.
+
+### GPU relocalization — on your workstation
+
+Install the optional deps (CUDA torch + LightGlue, which bundles ALIKED;
+optionally LoMa):
+
+```bash
+pip install "lightglue @ git+https://github.com/cvg/LightGlue.git"
+# optional alternative matcher:
+# pip install "loma @ git+https://github.com/davnords/LoMa.git"
+```
+
+**Option 1 — essential-matrix relocalization (ALIKED + LightGlue):**
+
+```bash
+python scripts/build_feature_db.py --mcap "$MCAP" \
+    --out outputs/feature_db.pkl --set runtime.device=cuda \
+    --exclude-start-s 680 --exclude-end-s 1063
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set metric_reloc.enabled=true --set runtime.device=cuda
+```
+
+**Option 2 — PnP against a triangulated 3D landmark map (strongest):**
+
+```bash
+python scripts/build_landmark_map.py --mcap "$MCAP" --cam fl \
+    --out outputs/landmarks_fl.npz --set runtime.device=cuda \
+    --exclude-start-s 680 --exclude-end-s 1063
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set pnp_reloc.enabled=true \
+    --set 'pnp_reloc.map_paths={fl: outputs/landmarks_fl.npz}' \
+    --set runtime.device=cuda
+```
+
+**Option 3 — learned border segmentation (lateral/yaw map fix):**
+
+```bash
+python run.py --mcap "$MCAP" --out outputs/submission.csv \
+    --set border_match.enabled=true --set segmentation.enabled=true \
+    --set runtime.device=cuda
+```
+
+**Benchmark matchers before promoting one:**
+
+```bash
+python scripts/benchmark_matchers.py --mcap "$MCAP" \
+    --matchers aliked_lightglue loma-b --cam fl --pairs 40 \
+    --set runtime.device=cuda      # -> reports/matcher_benchmark.csv
+```
+
+These paths can be combined (e.g. PnP + segmentation border matching); all
+corrections fuse through the one causal EKF and are hard-gated.
 
 ---
 

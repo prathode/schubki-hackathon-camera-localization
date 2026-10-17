@@ -129,12 +129,73 @@ remove.
 
 ## 5. What a GPU run should add (next steps on the target workstation)
 
-1. DINOv2 descriptor for relocalization (`reloc.descriptor=dinov2`), validated
-   for cross-session transfer on the held-out laps.
-2. Learned drivable-surface segmentation feeding `border_match` for a true
-   lateral/yaw map fix.
+1. **Metric visual relocalization with ALIKED + LightGlue** (implemented;
+   `metric_reloc.enabled=true`). This is the highest-expected-gain component
+   and directly attacks the residual drift of §4.4. Why it should beat the
+   coarse descriptors of §4.3: instead of a fuzzy nearest-pose lookup it
+   performs *learned feature matching* (robust to night / low texture /
+   viewpoint change) followed by essential-matrix / PnP geometry for a
+   *metric* pose, giving a true absolute `(x, y, yaw)` fix rather than a
+   ~18 m retrieval guess.
+
+   Pipeline: keyframe DB of ALIKED features + training GT poses (built
+   offline, permitted) → restrict candidates to the EKF-predicted
+   neighbourhood (avoids wrong-section matches) → LightGlue match → relative
+   pose → absolute fix → **EKF-gated** (inliers, reprojection, distance from
+   prediction), so a bad match can only be rejected, never corrupt the state.
+
+   *Caveat (measured concern, must be validated on the GPU):* the keyframes
+   come from the training session; the hidden test is a *different* session
+   with possibly different lighting/speed. Retrieval/matching may degrade
+   there. The hard EKF gating bounds the downside, but cross-session transfer
+   must be checked on the held-out laps before trusting it. This repo cannot
+   measure its accuracy (CPU-only sandbox); it is wired and runnable, and the
+   numbers come from the single-GPU workstation.
+
+   *Benchmark LoMa / learned VO as alternatives*, not defaults: measure match
+   quality, inlier ratio, localization error and runtime on identical frames
+   and only promote a component that measurably improves the official score.
+
+   **Triangulated 3D landmark map + PnP** (implemented; `pnp_reloc`). The
+   strongest absolute fix: adjacent training keyframes are matched and
+   triangulated (with their GT poses) into a sparse 3D point cloud
+   (`scripts/build_landmark_map.py`); at test time the query's 2D matches to
+   nearby landmarks are solved with PnP+RANSAC for a direct metric pose, with
+   no accumulated VO drift. The triangulation + PnP geometry is unit-tested on
+   synthetic data (`tests/test_landmarks.py`, sub-0.5 m). The pipeline prefers
+   PnP when a landmark map is present and falls back to the essential-matrix
+   relocalizer otherwise.
+
+   **LoMa as a benchmarked alternative matcher** (implemented;
+   `metric_reloc.matcher=loma-b|loma-l|loma-g`). `scripts/benchmark_matchers.py`
+   compares ALIKED+LightGlue vs LoMa on identical cross-lap frame pairs
+   (match count, inlier ratio, relative-yaw error, runtime). Promote a matcher
+   only if it measurably wins -- do not assume the newer model is better.
+
+2. **Learned drivable-surface segmentation** feeding `border_match`
+   (implemented; `segmentation.enabled=true`, torchvision DeepLabV3). It
+   replaces the classical night detector of §4.2 with clean road-boundary
+   pixels, so the (validated) ground-projection + map-ICP geometry gets
+   trustworthy input. A track-surface-specific fine-tuned segmenter is the
+   recommended further upgrade.
 3. With a reliable absolute fix in place, re-enable `tangent_yaw` safely for
    extra heading stability.
 
-All three are implemented behind config flags; only the learned front-ends
-require the GPU.
+### Component map (the brief's four methods, all implemented)
+
+| Brief method | Module | Default | Needs GPU |
+|---|---|---|---|
+| 1. Visual odometry (motion model) | `localization/motion.py` + EKF | on | no |
+| 2. Track-border matching | `perception/border_matcher.py` (+ `segmentation.py`) | off | optional |
+| 3. Reference-map relocalization | `perception/metric_reloc.py`, `landmarks.py` (ALIKED+LightGlue / LoMa / PnP) | off | yes |
+| 4. Causal filter fusion | `localization/ekf.py` + `pipeline.py` | on | no |
+
+All four are present and fuse through the one causal EKF; the GPU-dependent
+absolute-correction paths are off by default and enabled per the README.
+
+### Device safety
+
+All learned components resolve their device through `perception/device.py`
+(`resolve_device` / `to_device`): `runtime.device=auto|cpu|cuda|cuda:N`, with
+automatic CPU fallback on any CUDA failure (unavailable, OOM, driver, Pascal
+FlashAttention). The default pipeline needs no GPU and no external weights.

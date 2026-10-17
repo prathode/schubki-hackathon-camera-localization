@@ -51,7 +51,7 @@ class MatchResult:
 
 
 class BorderMatcher:
-    def __init__(self, cfg: dict, calib, track):
+    def __init__(self, cfg: dict, calib, track, segmenter=None):
         self.cfg = cfg
         bm = cfg["border_match"]
         self.cams = list(bm["cams"])
@@ -63,6 +63,19 @@ class BorderMatcher:
         self.track = track
         self.r_lateral = float(cfg["filter"]["r_lateral"])
         self.r_yaw = float(cfg["filter"]["r_yaw"])
+        # optional learned drivable-surface segmenter -> clean border pixels.
+        self.segmenter = segmenter
+        self._seg_boundary = None
+        if segmenter is not None:
+            from .segmentation import RoadBoundaryFromMask
+            self._seg_boundary = RoadBoundaryFromMask()
+
+    def _detect(self, img):
+        if self.segmenter is not None:
+            from .segmentation import detect_border_pixels_seg
+            return detect_border_pixels_seg(img, self.segmenter,
+                                            self._seg_boundary)
+        return detect_border_pixels(img)
 
     def _collect_points(self, iset, pose) -> np.ndarray:
         clouds = []
@@ -74,7 +87,7 @@ class BorderMatcher:
             if cc.extrinsics is None:
                 continue
             img = m.decode(color=True)
-            px = detect_border_pixels(img)
+            px = self._detect(img)
             if len(px) == 0:
                 continue
             xy, _ = ground_project_pixels(px, cc, pose, z_ground_bl=0.0)

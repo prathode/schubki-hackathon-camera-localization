@@ -28,25 +28,39 @@ except Exception:  # pragma: no cover
 
 
 class ThumbnailDescriptor:
-    """CPU multi-camera thumbnail signature."""
+    """CPU multi-camera place descriptor (intensity grid + edge grid + hist).
+
+    Combines, per camera: a 4x4 intensity grid, a 4x4 Canny-edge-density grid,
+    and a 16-bin intensity histogram. More discriminative than a raw thumbnail
+    for night place recognition (validated ~6 m retrieval with a motion prior),
+    while staying cheap and dependency-free. Used as a CPU drift bound; the
+    metric/PnP paths provide the sub-metre fix on a GPU.
+    """
+
+    GRID = 4
+    HIST = 16
 
     def __init__(self, cams: List[str], tw: int = 32, th: int = 16):
         self.cams = cams
-        self.tw, self.th = tw, th
-        self.dim = len(cams) * tw * th
+        self._per = self.GRID * self.GRID * 2 + self.HIST
+        self.dim = len(cams) * self._per
 
     def __call__(self, images: Dict[str, np.ndarray]) -> np.ndarray:
         vecs = []
         for c in self.cams:
             im = images.get(c)
             if im is None:
-                vecs.append(np.zeros(self.tw * self.th, np.float32))
+                vecs.append(np.zeros(self._per, np.float32))
                 continue
             g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) if im.ndim == 3 else im
-            g = cv2.resize(g, (self.tw, self.th)).astype(np.float32)
-            g = (g - g.mean()) / (g.std() + 1e-6)
-            vecs.append(g.ravel())
-        v = np.concatenate(vecs)
+            gs = cv2.resize(g, (self.GRID, self.GRID)).astype(np.float32).ravel()
+            e = cv2.Canny(g, 50, 150)
+            eg = cv2.resize(e, (self.GRID, self.GRID)).astype(np.float32).ravel()
+            h = cv2.calcHist([g], [0], None, [self.HIST], [0, 256]).astype(
+                np.float32).ravel()
+            vecs.append(np.concatenate([gs, eg, h]))
+        v = np.concatenate(vecs).astype(np.float32)
+        v = (v - v.mean()) / (v.std() + 1e-6)
         n = np.linalg.norm(v)
         return v / (n + 1e-9)
 
@@ -59,15 +73,16 @@ class DinoV2Descriptor:
     recognition. No ground truth involved.
     """
 
-    def __init__(self, cams: List[str], device: str = "cuda",
+    def __init__(self, cams: List[str], device: str = "auto",
                  model: str = "dinov2_vits14", img_size: int = 224):
         import torch  # noqa
+        from .device import to_device
         self.torch = torch
         self.cams = cams
-        self.device = device
         self.img_size = img_size
-        self.model = torch.hub.load("facebookresearch/dinov2", model)
-        self.model.eval().to(device)
+        net = torch.hub.load("facebookresearch/dinov2", model).eval()
+        # fail-safe device move: GPU trouble -> CPU instead of a crash.
+        self.model, self.device = to_device(net, device)
         self.mean = np.array([0.485, 0.456, 0.406], np.float32)
         self.std = np.array([0.229, 0.224, 0.225], np.float32)
         # per-camera embedding dim known after a dry run
@@ -111,7 +126,7 @@ def build_descriptor(cfg: dict):
     rc = cfg.get("reloc", {})
     kind = rc.get("descriptor", "thumb")
     if kind == "dinov2":
-        device = cfg.get("runtime", {}).get("device", "cpu")
+        device = cfg.get("runtime", {}).get("device", "auto")
         return DinoV2Descriptor(cams, device=device,
                                 model=rc.get("dino_model", "dinov2_vits14"))
     return ThumbnailDescriptor(cams)

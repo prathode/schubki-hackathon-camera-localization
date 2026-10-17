@@ -8,9 +8,13 @@ opencv-python-headless>=4.8,<4.11
 PyYAML>=6.0
 matplotlib>=3.7           # evaluation plots only
 
-# Optional, for the GPU relocalization path (declared external model DINOv2).
-# Install separately to match your CUDA; e.g. on a Pascal/P5200 use a CUDA
-# build of torch. These are NOT needed for the default (motion-only) pipeline.
+# Optional, for the GPU visual-relocalization paths. Declared external models:
+#   - ALIKED (BSD-3-Clause) + LightGlue (Apache-2.0) for metric relocalization
+#   - DINOv2 (optional) for coarse retrieval
+# Install a CUDA build of torch matching your driver; on a Pascal/P5200 use a
+# CUDA 11.x/12.x wheel. These are NOT needed for the default motion pipeline,
+# which is CPU-only. Device handling auto-falls back to CPU if the GPU fails.
 # torch>=2.0
 # torchvision>=0.15
-# timm>=0.9               # if using timm-hosted backbones
+# lightglue @ git+https://github.com/cvg/LightGlue.git   # provides ALIKED too
+# timm>=0.9               # only if using timm-hosted backbones
