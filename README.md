@@ -115,19 +115,24 @@ three cameras, parameter and camera sweep on laps 2 and 6) and then the final ru
 
 ## Where the results are
 
-Results, maps and caches are **not in git** (size, dataset licence). After running the commands above
-they are on the local disk:
+The submission file and the result files are committed under `results/` (copied from `out/`, which is
+not in git). Maps, caches and the dataset are **not in git** (size, dataset licence).
 
 | Path | Contents |
 |---|---|
-| `out/final_roma/final.csv` | current submission-format poses (`timestamp_ns,x,y,yaw`), with RoMa fallback |
-| `out/final_roma/final_eval.txt` | `evaluate.py` report: full run and validation laps 3, 7 |
-| `out/final_roma/final_timing.json` | mean / median / p95 time per frame, GPU |
-| `out/final_roma/final_log.csv` | every relocalization fix per camera and frame (`fl_roma` = RoMa) |
-| `out/final/` | previous version without RoMa (same files, plus `final_overview.png`) |
-| `out/stress/summary.csv` | photometric stress tests on laps 3, 7 (no RoMa) |
-| `out/stress_val_roma/summary.csv` | inverted images on laps 3, 7, with and without RoMa |
-| `out/roma_tune/summary*.csv` | RoMa settings compared on laps 2, 6 |
+| `results/submission.csv` | **submission file** (`timestamp_ns,x,y,yaw`), RoMa fallback on; same as `results/final_roma/final.csv` |
+| `results/final_roma/final_eval.txt` | `evaluate.py` report: full run and validation laps 3, 7 |
+| `results/final_roma/final_timing.json` | mean / median / p95 time per frame, GPU |
+| `results/final_roma/final_log.csv` | every relocalization fix per camera and frame (`fl_roma` = RoMa) |
+| `results/final_no_roma/` | previous version without RoMa (same files, plus `final_overview.png`, `selected_config.json`) |
+| `results/stress/summary.csv` | photometric stress tests on laps 3, 7 (no RoMa) |
+| `results/stress_val_roma/summary.csv` | inverted images on laps 3, 7, with and without RoMa |
+| `results/roma_tune/summary*.csv` | RoMa settings compared on laps 2, 6 |
+
+Running the commands above writes the same files to `out/`. Other outputs stay on the local disk only:
+
+| Path | Contents |
+|---|---|
 | `out/roma/exp_roma.csv` | offline LightGlue vs RoMa matcher comparison on laps 2, 6 |
 | `out/lolo/run3_log_sweep.csv` | camera-set × parameter sweep on held-out laps 2 and 6 |
 | `out/lolo/run3_log_best.json` | the selected configuration (copied to `configs/fl_rl.json`) |

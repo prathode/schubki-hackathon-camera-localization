@@ -1,0 +1,15 @@
+{
+ "cams": "fl,rl",
+ "params": {
+  "fix_lat": 0.1,
+  "fix_lon": 0.3,
+  "fix_gate_pos": 3.0,
+  "fix_floor": 0.2
+ },
+ "tune_laps": [
+  2,
+  6
+ ],
+ "tune_rmse": 0.18488297127510878,
+ "rule": "lowest position RMSE on the tuning laps"
+}

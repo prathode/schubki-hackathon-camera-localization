@@ -1,8 +1,18 @@
-mcap
-mcap-ros2-support
-numpy
-pandas
-scipy
-opencv-python>=4.4
-matplotlib
-torch  # optional: GPU matching (pip install torch --index-url https://download.pytorch.org/whl/cu126)
+# tested with Python env `camloc`: versions below are the ones the results were produced with
+mcap==1.5.0
+mcap-ros2-support==0.5.7
+numpy==2.5.4
+pandas==3.0.6
+scipy==1.18.1
+opencv-python==5.0.0.93
+matplotlib==3.11.2
+pillow==13.0.0
+# GPU matching: install torch with CUDA first, e.g.
+#   pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
+torch==2.14.1
+torchvision==0.29.1
+kornia==0.8.3
+# ALIKED + LightGlue keyframe relocalization (run.py)
+lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8
+# RoMa fallback (run.py --roma-fallback 1)
+romatch==0.1.2

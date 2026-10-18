@@ -1,0 +1,36 @@
+===== full run
+poses submitted        11943   evaluated 11943
+coverage (1 s bins)    100.0 %   (>= 90 % to be ranked)
+position RMSE  [m]     0.146   <- SCORE (lower is better)
+position median/p95    0.070 / 0.290
+lateral RMSE   [m]     0.072
+longitudinal RMSE [m]  0.127
+yaw RMSE     [deg]     0.110
+within 0.25 m          93.0 %
+within 0.50 m          99.1 %
+within 1.00 m          99.8 %
+
+===== val lap 3 (115.9 s, vmax 35.5 m/s)
+poses submitted        11943   evaluated 1159
+coverage (1 s bins)    100.0 %   (>= 90 % to be ranked)
+position RMSE  [m]     0.207   <- SCORE (lower is better)
+position median/p95    0.107 / 0.498
+lateral RMSE   [m]     0.131
+longitudinal RMSE [m]  0.160
+yaw RMSE     [deg]     0.149
+within 0.25 m          81.5 %
+within 0.50 m          95.3 %
+within 1.00 m          100.0 %
+
+===== val lap 7 (110.4 s, vmax 40.3 m/s)
+poses submitted        11943   evaluated 1104
+coverage (1 s bins)    100.0 %   (>= 90 % to be ranked)
+position RMSE  [m]     0.265   <- SCORE (lower is better)
+position median/p95    0.139 / 0.480
+lateral RMSE   [m]     0.109
+longitudinal RMSE [m]  0.241
+yaw RMSE     [deg]     0.130
+within 0.25 m          80.5 %
+within 0.50 m          95.6 %
+within 1.00 m          98.4 %
+
