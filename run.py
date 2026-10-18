@@ -78,7 +78,7 @@ def images(bag, cams, member, size, t_start=None, t_end=None):
     with open(bag, 'rb') as f:
         for i, (_, ch, _, msg) in enumerate(make_reader(f, decoder_factories=[DecoderFactory()]).iter_decoded_messages(
                 topics=list(topics), **window)):
-            if i % 2000 == 0:                                  # do not let the multi-GB bag fill the page cache
+            if i % 2000 == 0 and hasattr(os, 'posix_fadvise'):
                 os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
             c = topics[ch.topic]
             s = member.get((c, msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec))
@@ -102,6 +102,7 @@ def main():
     ap.add_argument('--init-pose', default=None, help='x,y,yaw; default: first /tf of the bag')
     ap.add_argument('--n-kf', type=int, default=2)
     ap.add_argument('--min-inl', type=int, default=15)
+    ap.add_argument('--reproj', type=float, default=3.5, help='PnP reprojection error threshold')
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--pf-config', default=None, help='JSON with {"params": {...}} overriding PFParams defaults')
     ap.add_argument('--roma-fallback', type=int, default=0, help='RoMa relocalization when LightGlue gives no fix')
@@ -173,7 +174,8 @@ def main():
         n_used, grays = 0, {}
         for c, jpeg in jpegs.items():
             gray = grays[c] = transform(cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_GRAYSCALE))
-            r = kfmaps[c].localize(feats, feats.extract(gray, masks[c]), pf.estimate(), n_kf=a.n_kf)
+            r = kfmaps[c].localize(feats, feats.extract(gray, masks[c]), pf.estimate(),
+                                   n_kf=a.n_kf, reproj=a.reproj, min_inliers=a.min_inl)
             if r['ok'] and r['n_inl'] >= a.min_inl and pf.update_fix(r['x'], r['y'], r['yaw']):
                 n_used += 1
             log.append(dict(timestamp_ns=t, cam=c, ok=int(r['ok']), n_inl=r['n_inl'], x=r['x'], y=r['y'], yaw=r['yaw']))

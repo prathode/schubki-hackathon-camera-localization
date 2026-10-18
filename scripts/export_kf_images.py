@@ -68,7 +68,7 @@ def main():
                 g8 = cv2.resize(g8, None, fx=a.scale, fy=a.scale, interpolation=cv2.INTER_AREA)
                 cv2.imwrite(f'{out}/{want[int(t)]}.jpg', g8, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 n += 1
-            if i % 2000 == 0:
+            if i % 2000 == 0 and hasattr(os, 'posix_fadvise'):
                 os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)     # do not let the bag fill the page cache
     print(f'{n}/{len(kf_t)} keyframe images -> {out}')
 

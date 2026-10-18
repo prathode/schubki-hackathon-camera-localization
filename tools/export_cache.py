@@ -72,7 +72,7 @@ def main():
         r = make_reader(f, decoder_factories=[DecoderFactory()])
         for i, (_, ch, m, msg) in enumerate(r.iter_decoded_messages(
                 topics=list(img_topic) + list(info_topic) + ['/tf_static', f'/{NS}/state_estimation',
-                                                             f'/{NS}/track_bounds'])):
+                                                             f'/{NS}/track_bounds', f'/{NS}/validation/twist'])):
             topic = ch.topic
             if topic in img_topic:
                 c = img_topic[topic]
@@ -84,6 +84,13 @@ def main():
                 img_count[c] += 1
             elif topic == f'/{NS}/state_estimation':
                 ws.writerow([stamp_ns(msg.header)] + [getattr(msg, k) for k in STATE_FIELDS])
+            elif topic == f'/{NS}/validation/twist':
+                row = {k: 0.0 for k in STATE_FIELDS}
+                row['vx_mps'] = msg.twist.linear.x
+                row['vy_mps'] = msg.twist.linear.y
+                row['wz_radps'] = msg.twist.angular.z
+                row['v_mps'] = float(np.hypot(msg.twist.linear.x, msg.twist.linear.y))
+                ws.writerow([stamp_ns(msg.header)] + [row[k] for k in STATE_FIELDS])
             elif topic in info_topic:
                 c = info_topic[topic]
                 if c not in info:
@@ -96,6 +103,17 @@ def main():
                 bounds = {mk.ns or str(mk.id): np.array([[p.x, p.y] for p in mk.points]) for mk in msg.markers}
             if i % 50000 == 0:
                 print(f'{i} msgs, t={m.log_time / 1e9:.1f}', flush=True)
+
+    if bounds is None:
+        for cand in ['cache/track_bounds.npz', '../Hackathon-schubki-gemi/data/track_and_calibration.json',
+                     'd:/Parikshit/Hackathon-schubki-gemi/data/track_and_calibration.json']:
+            if os.path.exists(cand):
+                if cand.endswith('.npz'):
+                    bounds = dict(np.load(cand))
+                else:
+                    with open(cand) as bf:
+                        bounds = {k: np.array(v) for k, v in json.load(bf)['track_bounds'].items()}
+                break
 
     calib = {}
     for c in CAMS:

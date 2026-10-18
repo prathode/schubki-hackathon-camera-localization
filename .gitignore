@@ -9,3 +9,10 @@ __pycache__/
 *.pyc
 maps/
 maps_no26/
+maps_test/
+cache_day/
+out_day_test/
+out_night_lap7/
+*.mp4
+*.npz
+*.pt
